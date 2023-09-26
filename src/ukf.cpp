@@ -54,6 +54,10 @@ UKF::UKF() {
    * TODO: Complete the initialization. See ukf.h for other member properties.
    * Hint: one or more values initialized above might be wildly off...
    */
+
+  is_initialized_ = false;
+
+  time_us_ = 0;
 }
 
 UKF::~UKF() {}
@@ -63,6 +67,66 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
    * TODO: Complete this function! Make sure you switch between lidar and radar
    * measurements.
    */
+
+  if(is_initialized_){
+    /**
+     * Initialize the state x_ with the first measurement.
+     * radar need to converet from polar to cartesian coordinates.
+     */
+
+    if(use_laser_ && meas_package.sensor_type_ == MeasurementPackage::LASER){
+      x_ << meas_package.raw_measurements_[0], 
+       			meas_package.raw_measurements_[1],
+       			0,
+            0,
+       			0;
+
+      P_ << std_laspx_ * std_laspx_, 0, 0, 0, 0,
+            0, std_laspy_ * std_laspy_, 0, 0, 0,
+            0, 0, 1, 0, 0, 
+            0, 0, 0, 1, 0,
+            0, 0, 0, 0, 1;
+
+      is_initialized_ = true;
+    }
+    else if(use_radar_ && meas_package.sensor_type_ == MeasurementPackage::RADAR){
+      double rho = meas_package.raw_measurements_[0];
+      double phi = meas_package.raw_measurements_[1];
+      double rho_dot = meas_package.raw_measurements_[2];
+      
+      x_ << rho * cos(phi), 
+       			rho * sin(phi),
+       			rho_dot,
+            phi,
+       			0;
+
+      P_ << std_radr_ * std_radr_, 0, 0, 0, 0,
+            0, std_radr_ * std_radr_, 0, 0, 0,
+            0, 0, std_radrd_ * std_radrd_, 0, 0,
+            0, 0, 0, std_radphi_ * std_radphi_, 0,
+            0, 0, 0, 0, 1;
+
+      is_initialized_ = true;
+    } 
+    time_us_ = meas_package.timestamp_;
+    
+    return;
+  }
+
+  // elapsed time
+  double delta_t = (meas_package.timestamp_ - time_us_) / 1E6;
+  time_us_ = meas_package.timestamp_;
+
+  /* Prediction */
+  Prediction(delta_t);
+
+  /* Update*/
+  if(use_laser_ && meas_package.sensor_type_ == MeasurementPackage::LASER)
+    UpdateLidar(meas_package);
+  else if(use_radar_ && meas_package.sensor_type_ == MeasurementPackage::RADAR)
+    UpdateRadar(meas_package);
+
+
 }
 
 void UKF::Prediction(double delta_t) {
