@@ -73,6 +73,14 @@ UKF::UKF() {
 
   // vector for weights
   weights_ = VectorXd(2 * n_aug_ + 1); 
+
+  R_lidar_ = MatrixXd(2, 2);  
+  R_lidar_ << std_laspx_*std_laspx_, 0,
+              0, std_laspy_*std_laspy_;
+
+  H_lidar_ = MatrixXd(2, 5);
+  H_lidar_ << 1, 0, 0, 0, 0,
+              0, 1, 0, 0, 0;
 }
 
 UKF::~UKF() {}
@@ -83,7 +91,7 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
    * measurements.
    */
 
-  if(is_initialized_){
+  if(!is_initialized_){
     /**
      * Initialize the state x_ with the first measurement.
      * radar need to converet from polar to cartesian coordinates.
@@ -176,9 +184,9 @@ void UKF::Prediction(double delta_t) {
   MatrixXd L = P_aug.llt().matrixL();
 
   // create augmented sigma points
+  Xsig_aug.fill(0.0);
   Xsig_aug.col(0) = x_aug;
-  for (int i = 0; i < n_aug_; ++i)
-  {
+  for (int i = 0; i < n_aug_; ++i){
     Xsig_aug.col(i + 1) = x_aug + sqrt(lambda_ + n_aug_) * L.col(i);
     Xsig_aug.col(i + 1 + n_aug_) = x_aug - sqrt(lambda_ + n_aug_) * L.col(i);
   }
@@ -186,8 +194,7 @@ void UKF::Prediction(double delta_t) {
   /* SigmaPointPrediction */
 
   // predict sigma points
-  for (int i = 0; i < 2 * n_aug_ + 1; ++i)
-  {
+  for (int i = 0; i < 2 * n_aug_ + 1; ++i){
     // extract values for better readability
     double p_x = Xsig_aug(0, i);
     double p_y = Xsig_aug(1, i);
@@ -201,13 +208,11 @@ void UKF::Prediction(double delta_t) {
     double px_p, py_p;
 
     // avoid division by zero
-    if (fabs(yawd) > 0.001)
-    {
+    if (fabs(yawd) > 0.001){
       px_p = p_x + v / yawd * (sin(yaw + yawd * delta_t) - sin(yaw));
       py_p = p_y + v / yawd * (cos(yaw) - cos(yaw + yawd * delta_t));
     }
-    else
-    {
+    else{
       px_p = p_x + v * delta_t * cos(yaw);
       py_p = p_y + v * delta_t * sin(yaw);
     }
@@ -236,23 +241,23 @@ void UKF::Prediction(double delta_t) {
   // set weights
   double weight_0 = lambda_ / (lambda_ + n_aug_);
   weights_(0) = weight_0;
-  for (int i = 1; i < 2 * n_aug_ + 1; ++i)
-  { // 2n+1 weights
+  for (int i = 1; i < 2 * n_aug_ + 1; ++i){
+     // 2n+1 weights
     double weight = 0.5 / (n_aug_ + lambda_);
     weights_(i) = weight;
   }
 
   // predicted state mean
   x_.fill(0.0);
-  for (int i = 0; i < 2 * n_aug_ + 1; ++i)
-  { // iterate over sigma points
+  for (int i = 0; i < 2 * n_aug_ + 1; ++i){
     x_ = x_ + weights_(i) * Xsig_pred_.col(i);
   }
 
   // predicted state covariance matrix
   P_.fill(0.0);
-  for (int i = 0; i < 2 * n_aug_ + 1; ++i)
-  { // iterate over sigma points
+
+  // iterate over sigma points
+  for (int i = 0; i < 2 * n_aug_ + 1; ++i){ 
     // state difference
     VectorXd x_diff = Xsig_pred_.col(i) - x_;
     // angle normalization
@@ -273,6 +278,28 @@ void UKF::UpdateLidar(MeasurementPackage meas_package) {
    * covariance, P_.
    * You can also calculate the lidar NIS, if desired.
    */
+  VectorXd z = VectorXd(2);
+  z << meas_package.raw_measurements_[0], meas_package.raw_measurements_[1];
+
+  VectorXd z_pred = H_lidar_ * x_;
+  VectorXd y = z - z_pred;
+  MatrixXd Ht = H_lidar_.transpose();
+  MatrixXd S = H_lidar_ * P_ * Ht + R_lidar_;
+  MatrixXd Si = S.inverse();
+  MatrixXd PHt = P_ * Ht;
+  MatrixXd K = PHt * Si;
+
+  // new estimate
+  x_ = x_ + (K * y);
+  // angle normalization
+  while (x_(3) > M_PI)
+    x_(3) -= 2. * M_PI;
+  while (x_(3) < -M_PI)
+    x_(3) += 2. * M_PI;
+
+  
+  MatrixXd I = MatrixXd::Identity(n_x_, n_x_);
+  P_ = (I - K * H_lidar_) * P_;
 }
 
 void UKF::UpdateRadar(MeasurementPackage meas_package) {
